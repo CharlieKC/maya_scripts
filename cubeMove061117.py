@@ -25,7 +25,7 @@ cmds.setAttr("%s.scalePivotTranslateX" % cube, k=True)
 cmds.setAttr("%s.scalePivotTranslateY" % cube, k=True)
 cmds.setAttr("%s.scalePivotTranslateZ" % cube, k=True)
 
-
+#edit
 
 def rollCube(vect, startTime, endTime, cubeTrans):
     x,y,z = vect
