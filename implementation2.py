@@ -45,10 +45,10 @@ def draw_tile(graph, id, style, width):
     if 'point_to' in style and style['point_to'].get(id, None) is not None:
         (x1, y1) = id
         (x2, y2) = style['point_to'][id]
-        if x2 == x1 + 1: r = "\u2192"
-        if x2 == x1 - 1: r = "\u2190"
-        if y2 == y1 + 1: r = "\u2193"
-        if y2 == y1 - 1: r = "\u2191"
+        if x2 == x1 + 1: r = "d"
+        if x2 == x1 - 1: r = "a"
+        if y2 == y1 + 1: r = "s"
+        if y2 == y1 - 1: r = "w"
     if 'start' in style and id == style['start']: r = "A"
     if 'goal' in style and id == style['goal']: r = "Z"
     if 'path' in style and id in style['path']: r = "@"
@@ -62,7 +62,7 @@ def draw_grid(graph, width=2, **style):
         print()
 
 # data from main article
-DIAGRAM1_WALLS = [from_id_width(id, width=30) for id in [21,22,51,52,81,82,93,94,111,112,123,124,133,134,141,142,153,154,163,164,171,172,173,174,175,183,184,193,194,201,202,203,204,205,213,214,223,224,243,244,253,254,273,274,283,284,303,304,313,314,333,334,343,344,373,374,403,404,433,434]]
+DIAGRAM1_WALLS = [from_id_width(id, width=30) for id in [21,22,51,52,31,32,33,34,81,82,93,94,111,112,123,124,133,134,141,142,153,154,163,164,171,172,173,174,175,183,184,193,194,201,202,203,204,205,213,214,223,224,243,244,253,254,273,274,283,284,303,304,313,314,333,334,343,344,373,374,403,404,433,434]]
 
 class SquareGrid:
     def __init__(self, width, height):
@@ -93,8 +93,8 @@ class GridWithWeights(SquareGrid):
     def cost(self, from_node, to_node):
         return self.weights.get(to_node, 1)
 
-diagram4 = GridWithWeights(10, 10)
-diagram4.walls = [(1, 7), (1, 8), (2, 7), (2, 8), (3, 7), (3, 8)]
+diagram4 = GridWithWeights(10,10 )
+diagram4.walls = [(1, 7), (1, 8), (2, 7), (2, 8), (3, 7), (3, 8), (1,1), (1,2), (1,3),(0,0)]
 diagram4.weights = {loc: 5 for loc in [(3, 4), (3, 5), (4, 1), (4, 2),
                                        (4, 3), (4, 4), (4, 5), (4, 6),
                                        (4, 7), (4, 8), (5, 1), (5, 2),
@@ -119,7 +119,7 @@ class PriorityQueue:
         return heapq.heappop(self.elements)[1]
 
 def dijkstra_search(graph, start, goal):
-    frontier = Priorit#yQueue()
+    frontier = PriorityQueue()
     frontier.put(start, 0)
     came_from = {}
     cost_so_far = {}
