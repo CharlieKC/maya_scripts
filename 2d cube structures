@@ -1,0 +1,314 @@
+import maya.cmds as cmds
+import random
+from collections import Counter
+import heapq
+import time
+start_time = time.time()
+random.seed(5423)
+
+#delete existing cubes
+cubeLs = cmds.ls('myCube*', tr=True)
+if len(cubeLs) > 0:
+    cmds.delete(cubeLs)
+    
+
+
+def getCubePos(cubeTrans):
+    coords = map(int, cmds.xform(cubeTrans, q=True, t=True, os=True))
+    return tuple(roundCoords(coords))
+  
+def getCubeLocations(name):
+  locations = []
+  for cube in cmds.ls('%s*' % name, tr=True):
+    locations.append(getCubePos(cube))
+  return locations
+  
+
+class SquareGrid:
+    def __init__(self, width, height, depth):
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.walls = []
+
+    def in_bounds(self, id):
+        (x, y, z) = id
+        return 0 <= x < self.width and 0 <= y < self.height and 0<= z <self.depth
+
+    def passable(self, id):
+        return id not in self.walls
+
+    def neighbors(self, id):
+        (x, y, z) = id
+        results = [(x+1,y,z), (x,y,z-1), (x-1,y,z), (x,y,z+1), #Neighbors on flat
+        #(x,y+1,z),(x,y-1,z), #Directly above and below
+        (x+1,y+1,z), (x,y+1,z-1), (x-1,y+1,z), (x,y+1,z+1), #Neighbours above
+        (x+1,y-1,z), (x,y-1,z-1), (x-1,y-1,z), (x,y-1,z+1), #Neighbors below
+        ]
+        #if (x + y) % 2 == 0: results.reverse() # aesthetics
+        results = filter(self.in_bounds, results)
+        results = filter(self.passable, results) #for a result add neighbor above if square is occupied
+        return results
+
+class GridWithWeights(SquareGrid):
+    def __init__(self, width, height, depth):
+        SquareGrid.__init__(self, width, height, depth)
+        self.weights = {}
+
+    def cost(self, from_node, to_node):
+        return self.weights.get(to_node, 1) #TODO: add cost for a verticle move, cost up should be higher than down
+
+
+class PriorityQueue:
+    def __init__(self):
+        self.elements = []
+
+    def empty(self):
+        return len(self.elements) == 0
+
+    def put(self, item, priority):
+        heapq.heappush(self.elements, (priority, item))
+
+    def get(self):
+        return heapq.heappop(self.elements)[1]
+
+
+def reconstruct_path(came_from, start, goal):
+    current = goal
+    path = [current]
+    while current != start:
+        current = came_from[current]
+        path.append(current)
+    #path.append(start) 
+    path.reverse() # optional
+    return path
+
+def heuristic(a, b):
+    (x1, y1, z1) = a
+    (x2, y2, z2) = b
+    return abs(x1 - x2) + abs(y1 - y2) + abs(z1 - z2)
+
+def a_star_search(graph, start, goal):
+    frontier = PriorityQueue()
+    frontier.put(start, 0)
+    came_from = {}
+    cost_so_far = {}
+    came_from[start] = None
+    cost_so_far[start] = 0
+
+    while not frontier.empty():
+        current = frontier.get()
+
+        if current == goal:
+            break
+
+        for next in graph.neighbors(current):
+            new_cost = cost_so_far[current] + graph.cost(current, next)
+            if next not in cost_so_far or new_cost < cost_so_far[next]:
+                cost_so_far[next] = new_cost
+                priority = new_cost + heuristic(goal, next)
+                frontier.put(next, priority)
+                came_from[next] = current
+
+    return came_from, cost_so_far
+#make cube
+def createCube():
+    cube = cmds.polyCube(name='myCube#')[0]
+    cmds.move(0,0,0, cube, r=True)
+    #make pivot attr keyable
+    cmds.setAttr("%s.rotatePivotTranslateY" % cube, k=True)
+    cmds.setAttr("%s.rotatePivotTranslateX" % cube, k=True)
+    cmds.setAttr("%s.rotatePivotTranslateZ" % cube, k=True)
+    cmds.setAttr("%s.scalePivotX" % cube, k=True)
+    cmds.setAttr("%s.scalePivotY" % cube, k=True)
+    cmds.setAttr("%s.scalePivotZ" % cube, k=True)
+    cmds.setAttr("%s.rotatePivotX" % cube, k=True)
+    cmds.setAttr("%s.rotatePivotY" % cube, k=True)
+    cmds.setAttr("%s.rotatePivotZ" % cube, k=True)
+    cmds.setAttr("%s.scalePivotTranslateX" % cube, k=True)
+    cmds.setAttr("%s.scalePivotTranslateY" % cube, k=True)
+    cmds.setAttr("%s.scalePivotTranslateZ" % cube, k=True)
+
+def roundCoords(coords):
+    for i in range(len(coords)):
+        coords[i] = round(coords[i]*2)/2
+    return coords
+
+
+
+def getLastKeyframe(cubeTrans):
+    try:
+        return cmds.keyframe('%s.translateX' % cubeTrans, q=True)[-1] #could make this more general, but works for now
+    except: #no keyframe set
+        return 0
+
+def resetPivotAndRotation(cubeTrans):
+    cmds.xform(cubeTrans, centerPivots=True)
+    cmds.rotate(0,0,0,cubeTrans)
+
+def rollCube(vect, startTime, stepTime, cubeTrans):
+    endTime = startTime + stepTime
+    z,y,x = vect
+    xRot,yRot,zRot = x*90, y*90, z*(-90)
+    xHalf, yHalf, zHalf = x*0.5, y*0.5, z*0.5
+    #print(x,y,z,xHalf,yHalf,zHalf,xRot,yRot,zRot)
+    #centres pivot, and cube orientation reset, then moves y pivot down
+    resetPivotAndRotation(cubeTrans)
+    if y < 1:
+        cmds.move(0,-0.5,0,'%s.scalePivot' % cubeTrans, '%s.rotatePivot' % cubeTrans, r=True)
+        if y == -1:
+            xRot = xRot*2
+            zRot = zRot*2
+    else:
+        cmds.move(0,0.5,0,'%s.scalePivot' % cubeTrans, '%s.rotatePivot' % cubeTrans, r=True)
+        xRot = xRot*2
+        zRot = zRot*2
+    #put pivot on the correct bottom edge
+    cmds.move(zHalf,0,xHalf,'%s.scalePivot' % cubeTrans, '%s.rotatePivot' % cubeTrans, r=True)
+
+
+    cmds.setKeyframe(cubeTrans, time=startTime)
+    cmds.rotate(xRot,0,zRot, cubeTrans, r=True)
+    cmds.setKeyframe(cubeTrans, time=endTime-1)
+    resetPivotAndRotation(cubeTrans)
+    cmds.setKeyframe(cubeTrans, time=endTime)
+    return getCubePos(cubeTrans) #return not needed?
+
+
+
+def uniqueXYZList(listToCheck):
+    while True:
+        x = random.choice([random.randrange(0,7), random.randrange(11,20)])
+        z = random.choice([random.randrange(0,7), random.randrange(11,20)])
+        y = 0 #not currently unique, for the sake of 2D implementation
+        if (x,y,z) not in listToCheck:
+            break
+        else:
+          print("Duplicate XYZ in List retrying", (x,y,z))
+    return (x,y,z)
+    
+    
+def uniqueXYZDict(dictToCheck):
+    while True:
+        x = random.randrange(3,18)
+        z = random.randrange(3,18)
+        y = 0 #not currently unique, for the sake of 2D implementation
+        if (x,y,z) not in dictToCheck.values():
+            break
+        else:
+          print("Duplicate XYZ in Dict retrying", (x,y,z))
+    return (x,y,z)
+    
+
+
+
+'''
+grid3d.weights = {loc: 5 for loc in [(3, 4), (3, 5), (4, 1), (4, 2),
+                                       (4, 3), (4, 4), (4, 5), (4, 6),
+                                       (4, 7), (4, 8), (5, 1), (5, 2),
+                                       (5, 3), (5, 4), (5, 5), (5, 6),
+                                       (5, 7), (5, 8), (6, 2), (6, 3),
+                                       (6, 4), (6, 5), (6, 6), (6, 7),
+                                       (7, 3), (7, 4), (7, 5)]}
+'''
+
+'''-----------MAIN SCRIPT------------'''
+step = 12
+grid3d = GridWithWeights(20, 5, 20)
+
+grid3d.walls = []
+cubesInFinalPos = {} 
+cubesStartPos = {}
+cubesGoalPos = {}
+cubesFailedMoves = {}
+destination = []
+for x in range(7,15):
+  for y in range(0,1):
+    for z in range(7,15):
+      if z==7 or z==14 or x ==7 or x ==14 or x==z:
+        destination.append(tuple([x,y,z]))
+print(destination)
+print(len(destination))
+
+
+
+for i in range(0,len(destination)):
+    createCube()
+
+
+for cube in cmds.ls('myCube*', tr=True): #Give cubes start+goal and move to start
+    cubesInFinalPos[cube] = False
+    cubesFailedMoves[cube] = 0
+    (x,y,z) = uniqueXYZList(grid3d.walls)
+    cmds.move(x,y,z, cube, r=True)
+    cubesStartPos[cube] = getCubePos(cube)
+    cubesGoalPos[cube] = destination.pop(0)
+    #grid3d.walls.append(getCubePos(cube))
+    '''
+    while True: #make sure the start and goal aren't the same
+        cubesGoalPos[cube] = uniqueXYZDict(cubesGoalPos)
+        if cubesGoalPos[cube] != cubesStartPos[cube]:
+            break
+    '''
+
+
+loopCount = 0
+subLoopCount = 0
+while False in cubesInFinalPos.values():
+    loopCount+=1
+    grid3d = GridWithWeights(20, 5, 20)
+    grid3d.walls.extend(getCubeLocations('myCube'))
+
+    for cube in cmds.ls('myCube*', tr=True):
+      subLoopCount +=1
+      currentPos = getCubePos(cube)
+      grid3d.walls.remove(currentPos)
+      cubeAbove = tuple([currentPos[0],currentPos[1]+1, currentPos[2]]) in grid3d.walls
+
+      if (not cubesInFinalPos[cube]) and (not cubeAbove):
+        try:
+            if currentPos == cubesGoalPos[cube]:
+                cubesInFinalPos[cube] = True
+            else:
+                came_from, cost_so_far = a_star_search(grid3d, currentPos, cubesGoalPos[cube])
+                path = reconstruct_path(came_from, currentPos, cubesGoalPos[cube])
+
+                while path != []:
+                    nextMove = path.pop(0)
+                    if nextMove != currentPos:
+                        grid3d.walls.append(nextMove)
+                        xMove = nextMove[0] - currentPos[0]
+                        yMove = nextMove[1] - currentPos[1]
+                        zMove = nextMove[2] - currentPos[2]
+                        rollCube([xMove,yMove,zMove],getLastKeyframe(cube)+1,step,cube)
+                        break #once cube has moved once
+
+        except:
+            cubesFailedMoves[cube] += 1
+            rollCube([0,0,0],getLastKeyframe(cube)+1,step,cube)
+      elif cubeAbove:
+        cubesFailedMoves[cube] += 1
+        rollCube([0,0,0],getLastKeyframe(cube)+1,step,cube)
+
+
+      if cubesFailedMoves[cube] > 40: #stop the cube from trying to move if it can't reach its destination
+        cubesInFinalPos[cube] = True
+        print("%s cube failed to reach destination" % cube, "Start: ", cubesStartPos, "Goal: ", cubesGoalPos[cube])
+      grid3d.walls.append(currentPos)
+
+
+
+print("Start Positions:")
+print(cubesStartPos)
+print("Goal Positions:")
+print(cubesGoalPos)
+print("Failed Moves:")
+print(cubesFailedMoves)\
+
+print("Sub loop count: %s, main loop count: %s." % (subLoopCount, loopCount))
+
+
+print("--- %s seconds ---" % (time.time() - start_time))
+
+
+
